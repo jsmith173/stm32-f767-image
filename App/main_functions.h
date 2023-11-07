@@ -23,12 +23,12 @@ extern "C" {
 
 // Initializes all data needed for the example. The name is important, and needs
 // to be setup() for Arduino compatibility.
-int ai_setup();
+void ai_setup();
 
 // Runs one iteration of data gathering and inference. This should be called
 // repeatedly from the application code. The name needs to be loop() for Arduino
 // compatibility.
-int ai_loop();
+int ai_loop(int current_case);
 
 #ifdef __cplusplus
 }

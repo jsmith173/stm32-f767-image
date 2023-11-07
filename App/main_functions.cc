@@ -19,16 +19,21 @@ limitations under the License.
 #include "main.h"
 #include "img_array.h"
 
-#include "tensorflow/lite/micro/limited_ops_resolver.h"
+#include "tensorflow/lite/micro/all_ops_resolver.h"
 #include "constants.h"
 #include "output_handler.h"
 #include "tensorflow/lite/micro/micro_error_reporter.h"
 #include "tensorflow/lite/micro/micro_interpreter.h"
 #include "tensorflow/lite/micro/system_setup.h"
 #include "tensorflow/lite/schema/schema_generated.h"
-#include "model_quant_data.h"
 
-#define ARENA_SIZE (440*1024)
+#ifdef USE_FLOAT
+ #include "mnist_model_float_data.h"
+ #define ARENA_SIZE (140*1024)
+#else
+ #include "mnist_model_uint8_data.h"
+ #define ARENA_SIZE (32*1024)
+#endif
 
 // Globals, used for compatibility with Arduino-style sketches.
 namespace {
@@ -43,8 +48,10 @@ constexpr int kTensorArenaSize = ARENA_SIZE;
 uint8_t tensor_arena[kTensorArenaSize];
 }  // namespace
 
+const float* p_images[10];
+
 // The name of this function is important for Arduino compatibility.
-int ai_setup() {
+void ai_setup() {
   tflite::InitializeTarget();
 
   // Set up logging. Google style is to avoid globals or statics because of
@@ -55,18 +62,22 @@ int ai_setup() {
 
   // Map the model into a usable data structure. This doesn't involve any
   // copying or parsing, it's a very lightweight operation.
-  model = tflite::GetModel(g_model_quant_data);
+  #ifdef USE_FLOAT
+  model = tflite::GetModel(g_mnist_float_model_data);
+  #else
+  model = tflite::GetModel(g_mnist_uint8_model_data);
+  #endif
   if (model->version() != TFLITE_SCHEMA_VERSION) {
     TF_LITE_REPORT_ERROR(error_reporter,
                          "Model provided is schema version %d not equal "
                          "to supported version %d.",
                          model->version(), TFLITE_SCHEMA_VERSION);
-    return 0;
+    return;
   }
 
   // This pulls in all the operation implementations we need.
   // NOLINTNEXTLINE(runtime-global-variables)
-  static tflite::LimitedOpsResolver resolver;
+  static tflite::AllOpsResolver resolver;
 
   // Build an interpreter to run the model with.
   static tflite::MicroInterpreter static_interpreter(
@@ -77,7 +88,7 @@ int ai_setup() {
   TfLiteStatus allocate_status = interpreter->AllocateTensors();
   if (allocate_status != kTfLiteOk) {
     TF_LITE_REPORT_ERROR(error_reporter, "AllocateTensors() failed");
-    return 0;
+    return;
   }
 
   // Obtain pointers to the model's input and output tensors.
@@ -87,10 +98,19 @@ int ai_setup() {
   // Keep track of how many inferences we have performed.
   inference_count = 0;
   
+  p_images[0] = img_array0;
+  p_images[1] = img_array1;
+  p_images[2] = img_array2;
+  p_images[3] = img_array3;
+  p_images[4] = img_array4;
+  p_images[5] = img_array5;
+  p_images[6] = img_array6;
+  p_images[7] = img_array7;
+  p_images[8] = img_array8;
+  p_images[9] = img_array9;
+  
   // ai_setup end: Blue LED
   HAL_GPIO_WritePin(GPIOB, GPIO_PIN_7, GPIO_PIN_SET);   
-  
-  return 1;
 }
 
 template <typename T>
@@ -117,48 +137,37 @@ int argmax()
   return idx;
 }
 
-#define IMG_SIZE (96*96*3)
-
-volatile unsigned char p_ext_input_data[IMG_SIZE];
-volatile uint8_t* input_data_uint8=NULL;
-
-//#define ENABLE_COPY_ORIGINAL_IMAGE
+int ai_result[32];
 
 // The name of this function is important for Arduino compatibility.
-int ai_loop() {
+int ai_loop(int current_case) {
   int tensor_size = input->bytes;
   int dim_size = input->dims->size;
   int dim_1 = input->dims->data[0];
   int dim_h = input->dims->data[1];
   int dim_w = input->dims->data[2];
-  int dim_pic = 1;
-  if (dim_size == 4)
-   dim_pic = input->dims->data[3];
   int N = dim_w*dim_h;
-  int passed, data, k;
-  uint8_t ui8Data;
+  float *input_data_float=NULL, *img_sel;
+  uint8_t* input_data_uint8=NULL;
+  int passed;
   
-  // In this model we have input->params.scale=1, input->params.zero_point=0
-  
-  input_data_uint8 = tflite::GetTensorData<uint8_t>(input);
+  if (output->type == kTfLiteFloat32)
+   input_data_float = tflite::GetTensorData<float>(input);
+  else
+   input_data_uint8 = tflite::GetTensorData<uint8_t>(input);
 
+  img_sel = (float*)p_images[current_case];
+  
   // Copy the buffer to input tensor
-  #ifdef ENABLE_COPY_ORIGINAL_IMAGE
-  k = 0;
   for (int i = 0; i < N; i++) {
-   data = img_array[i];
-   for (int j = 0; j < 3; j++) {
-	ui8Data = data & 0xFF;
-    input_data_uint8[k++] = ui8Data;
-	data >>= 8;
+   if (output->type == kTfLiteFloat32)
+    input_data_float[i] = img_sel[i];
+   else {
+	float x = img_sel[i];
+    uint8_t x_quantized = x / input->params.scale + input->params.zero_point;
+    input_data_uint8[i] = x_quantized;
    }
   }
-  #else
-  for (int i = 0; i < IMG_SIZE; i++) {
-   ui8Data = p_ext_input_data[i];
-   input_data_uint8[i] = ui8Data;
-  }
-  #endif
 
   // Run inference, and report any error
   TfLiteStatus invoke_status = interpreter->Invoke();

@@ -20,25 +20,8 @@
 #include "main.h"
 #include "string.h"
 
-/* Private includes ----------------------------------------------------------*/
-/* USER CODE BEGIN Includes */
+//#define ENABLE_SPECIFIC_CONV
 
-/* USER CODE END Includes */
-
-/* Private typedef -----------------------------------------------------------*/
-/* USER CODE BEGIN PTD */
-
-/* USER CODE END PTD */
-
-/* Private define ------------------------------------------------------------*/
-/* USER CODE BEGIN PD */
-
-/* USER CODE END PD */
-
-/* Private macro -------------------------------------------------------------*/
-/* USER CODE BEGIN PM */
-
-/* USER CODE END PM */
 
 /* Private variables ---------------------------------------------------------*/
 #if defined ( __ICCARM__ ) /*!< IAR Compiler */
@@ -84,6 +67,7 @@ static void MX_USB_OTG_FS_PCD_Init(void);
 /* USER CODE BEGIN 0 */
 
 /* USER CODE END 0 */
+#define num_of_all_cases 10
 
 /**
   * @brief  The application entry point.
@@ -126,29 +110,34 @@ int main(void)
   // MCU Init end: Green LED
   HAL_GPIO_WritePin(GPIOB, GPIO_PIN_0, GPIO_PIN_SET);   
 
-  int a, current_case, passed, setup_ok, ai_result[32];
+  int a, current_case, passed, result, ai_result[32];  
   
   /* USER CODE END 2 */
-  setup_ok = ai_setup(); 
+  ai_setup(); 
   /* Infinite loop */
   
   /* USER CODE BEGIN WHILE */
   /* USER CODE END WHILE */
-  passed = 0; result = 0;
+  passed = 1;
   
-  if (setup_ok) {
-   result = ai_loop();
-
-   if (result == 3) passed = 1;
-   HAL_GPIO_WritePin(GPIOD, GPIO_PIN_0 << result, GPIO_PIN_SET);
+  #ifdef ENABLE_SPECIFIC_CONV
+  current_case = 1;
+  result = ai_loop(current_case);
+  if (current_case != result) passed = 0;
+  #else
+  for (int i=0; i<num_of_all_cases; i++) {
+   result = ai_loop(i);
+   ai_result[i] = result;
+   if (i != result) passed = 0;
+  }
+  #endif
    
    // End off classification and OK: Red LED
    if (passed) {
     HAL_GPIO_WritePin(GPIOB, GPIO_PIN_14, GPIO_PIN_SET);   
    }
    else { //error
-    HAL_GPIO_WritePin(GPIOB, GPIO_PIN_0, GPIO_PIN_RESET);   
-   }
+   HAL_GPIO_WritePin(GPIOB, GPIO_PIN_14, GPIO_PIN_RESET);
   }
    
   // End program
